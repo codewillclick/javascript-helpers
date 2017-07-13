@@ -281,6 +281,13 @@ DragFiller = {
 
 
 
+// NOTE: This is really more to prevent accidents than enforce strict behavior.
+//   Nothing particularly immutable about an object's '.arr' property.  I
+//   could've used a local scope variable and assigned each function in the
+//   constructor, but it's slower.
+//
+//   Also, using this at all may make this library less friendly to use.  May
+//   rethink in the future.
 function ImmutableArrayAccessor(arr)
 {
 	this.arr = arr;
