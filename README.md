@@ -7,3 +7,6 @@ Create nested timers that pause on _another's_ pause somewhere up the parent cha
 
 ### itertools.js
 Mirror python's itertools module's functionaility in javascript.  An experiment in javascript's yield statements.
+
+### helpers.js
+Helper functions used for typing brevity and general convenience, a number of which are experimental, untested, or unfinished.
