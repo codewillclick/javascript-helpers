@@ -1,4 +1,8 @@
 
+// itertools.js:
+//   An effort in mirroring python's itertools library.
+
+
 var module = module || {};
 module.exports = module.exports || window;
 
