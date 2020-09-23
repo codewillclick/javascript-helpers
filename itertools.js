@@ -2,6 +2,7 @@
 // itertools.js:
 //   An effort in mirroring python's itertools library.
 
+itertools_js =  true;
 
 var module = module || {};
 module.exports = module.exports || window;
@@ -172,6 +173,36 @@ M.takewhile = function * takewhile(f,r) {
 			break;
 		yield a;
 	}
+}
+
+// TODO: Make arbirtary-argument-length product.
+M.product2 = function * product2(r1,r2) {
+	for (var a of r1)
+		for (var b of r2)
+			yield [a,b];
+}
+M.product3 = function * product2(r1,r2,r3) {
+	for (var a of r1)
+		for (var b of r2)
+			for (var c of r3)
+				yield [a,b,c];
+}
+
+
+// A few of mine
+M.reduce = function reduce(f,r,start) {
+	
+	start = (typeof start === 'undefined' ? [] : [start]);
+	
+	var gen = chain(start,r);
+	var prev = gen.next().value;
+	if (prev.done)
+		return;
+	
+	for (var a of gen) {
+		prev = f(prev,a);
+	}
+	return prev;
 }
 
 

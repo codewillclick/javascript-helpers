@@ -1,6 +1,6 @@
 
 // author: Cesar A. Longoria II
-// copyright (under MIT): 2014-2018
+// copyright (under MIT): 2014-2020
 
 /**
 	key: stores these in a table, so a key makes later removal convenient.
@@ -33,6 +33,8 @@
 		    always end with { e.preventDefault(); return true; }.
 */
 
+drag_js = true;
+
 Element.prototype.addDragListener =
 	function(key,mousedown,drag,mouseup,relatedNodes,params)
 {
@@ -60,9 +62,13 @@ Element.prototype.addDragListener =
 	
 	var trueOffset = function(node)
 	{
+		// NOTE: A node without an offsetParent can still have offsetLeft/Right
+		//   values.  Running the while loop on (n.offsetParent) may be the wrong
+		//   choice.  Switching to (n).
 		var n = node;
 		var off = {x:0,y:0};
-		while (n.offsetParent)
+		//while (n.offsetParent)
+		while (n)
 		{
 			off.x += parseFloat(n.offsetLeft);
 			off.y += parseFloat(n.offsetTop);
@@ -112,47 +118,53 @@ Element.prototype.addDragListener =
 			});
 		};
 		
-		// UNCERTAIN: Should I run pushCurrent on mousedown?  I'll go ahead and try.
-		pushCurrent(e);
+		function abort() {
+			dragging = false;
+			document.removeEventListener('mousemove',dragFunc);
+			document.removeEventListener('mouseup',endFunc);
+		}
 		
-		document.addEventListener('mousemove',dragFunc=function(e)
-		{
-			pushCurrent(e);
-			
+		// UNCERTAIN: Should I run pushCurrent on mousedown?  I'll go ahead and try.
+		//pushCurrent(e); // <- run further down...
+		
+		function makeDragData(src,eventName) {
+			// NOTE: Wait, I think src here is pointless...
 			var dragData = {
+				abort:abort,
+				select:function() { handleSelect = true },
 				length:function(){return offsetArrays.mouse.length},
 				diff:function(a,b,index)
 				{
 					return new XYPoint(
-						this[a].get(index).x-this[b].get(index).x,
-						this[a].get(index).y-this[b].get(index).y
+						src[a].get(index).x-src[b].get(index).x,
+						src[a].get(index).y-src[b].get(index).y
 					);
 					return {
-						x:this[a].get(index).x-this[b].get(index).x,
-						y:this[a].get(index).y-this[b].get(index).y
+						x:src[a].get(index).x-src[b].get(index).x,
+						y:src[a].get(index).y-src[b].get(index).y
 					};
 				},
-				first:function(a,b){return this.diff(a,b,0)},
-				last:function(a,b){return this.diff(a,b,this.length()-1)},
+				first:function(a,b){return src.diff(a,b,0)},
+				last:function(a,b){return src.diff(a,b,src.length()-1)},
 				iterDiff:function * (a,b,filler,triggerDistance) {
 					if (!filler)
 						for (var i=0; i < offsetArrays.mouse.length; ++i)
-							yield this.diff(a,b,i);
+							yield src.diff(a,b,i);
 					else {
 						triggerDistance = triggerDistance || 1;
 						// assert mouse.length >= 1, since at least one point is created on
 						// initial mousedown.
 						var i=0;
 						var p1,p2,d;
-						p1 = this.diff(a,b,0);
+						p1 = src.diff(a,b,0);
 						//console.log('yield very first p1',p1);
 						yield p2;
 						for (var i=1; i < offsetArrays.mouse.length; ++i) {
-							p2 = this.diff(a,b,i);
+							p2 = src.diff(a,b,i);
 							//console.log('behesting',i,p2);
 							d = Math.sqrt((p1.x-p2.x)*(p1.x-p2.x) + (p1.y-p2.y)*(p1.y-p2.y));
 							if (d > triggerDistance) {
-								for (var p of filler.call(this,p1,p2,triggerDistance,i))
+								for (var p of filler.call(src,p1,p2,triggerDistance,i))
 									yield p;
 							}
 							//console.log('yield p2',p2);
@@ -164,20 +176,20 @@ Element.prototype.addDragListener =
 				iterDiffBack:function * (a,b,filler,triggerDistance) {
 					if (!filler)
 						for (var i=offsetArrays.mouse.length-1; i >= 0; --i)
-							yield this.diff(a,b,i);
+							yield src.diff(a,b,i);
 					else {
 						triggerDistance = triggerDistance || 1;
 						var i=0;
 						var p1,p2,d;
-						p1 = this.last(a,b);
+						p1 = src.last(a,b);
 						//console.log('yield very first p1',p1);
 						yield p2;
 						for (var i=offsetArrays.mouse.length-1; i >= 0; --i) {
-							p2 = this.diff(a,b,i);
+							p2 = src.diff(a,b,i);
 							//console.log('behesting',i,p2);
 							d = Math.sqrt((p1.x-p2.x)*(p1.x-p2.x) + (p1.y-p2.y)*(p1.y-p2.y));
 							if (d > triggerDistance) {
-								for (var p of filler.call(this,p1,p2,triggerDistance,i))
+								for (var p of filler.call(src,p1,p2,triggerDistance,i))
 									yield p;
 							}
 							//console.log('yield p2',p2);
@@ -185,16 +197,29 @@ Element.prototype.addDragListener =
 							p1 = p2;
 						}
 					}
-				}
+				},
+				eventName:eventName
 			};
-			lastDragData = dragData;
-			
+			src = dragData;
+			return dragData;
+		}
+		
+		function fillDragData(dragData) {
 			// Accessors are used, as opposed to the original arrays, as they are
 			// representative of data *history*, and that must remain unchanged.
 			for (var p in offsetArrays)
 				dragData[p] = new ImmutableArrayAccessor(offsetArrays[p]);
 			dragData.timing = timingArrayAccessor; //new ImmutableArrayAccessor(timingArray);
 			dragData.timingStart = timingStartEpoch*1000 + (timingStart%1000);
+		}
+		
+		document.addEventListener('mousemove',dragFunc=function(e)
+		{
+			pushCurrent(e);
+			
+			var dragData = makeDragData(this,'mousemove');
+			fillDragData(dragData);
+			lastDragData = dragData;
 			
 			// Call with Element as 'this' in function.
 			self._drag = drag;
@@ -204,26 +229,38 @@ Element.prototype.addDragListener =
 		
 		document.addEventListener('mouseup',endFunc=function endFunc(e)
 		{
+			lastDragData.eventName = 'mouseup'
 			self._mouseup = mouseup;
 			self._mouseup(e,lastDragData);
 			delete self._mouseup;
 			
-			dragging = false;
-			document.removeEventListener('mousemove',dragFunc);
-			document.removeEventListener('mouseup',endFunc);
+			abort();
+			//dragging = false;
+			//document.removeEventListener('mousemove',dragFunc);
+			//document.removeEventListener('mouseup',endFunc);
 		});
 		
 		self._dragEvents[key].dragFunc = dragFunc;
 		self._dragEvents[key].endFunc = endFunc;
 		
+		var handleSelect = false;
+		var handler = {
+			abort:abort,
+			select:function() { handleSelect = true }
+		};
+		
 		// Run the mousedown function.
 		pushCurrent(e);
+		lastDragData = makeDragData(this,'mousedown');
+		fillDragData(lastDragData);
+		
 		this._mousedown = mousedown;
-		this._mousedown(e);
+		//this._mousedown(e,handler);
+		this._mousedown(e,lastDragData);
 		delete this._mousedown;
 		
 		// Prevent highlight selection, by default.
-		if (!params || !params.selection)
+		if ((!params || !params.selection) && !handleSelect)
 		{
 			e.preventDefault();
 			return false;
@@ -248,6 +285,12 @@ function XYPoint(x,y) {
 }
 XYPoint.prototype.toString = function() {
 	return this.x+','+this.y;
+};
+XYPoint.prototype.add = function(b) {
+	return new XYPoint(this.x+b.x, this.y+b.y);
+};
+XYPoint.prototype.sub = function(b) {
+	return new XYPoint(this.x-b.x, this.y-b.y);
 };
 
 // These are called with context of 'this' belonging to a dragData object being
@@ -281,6 +324,8 @@ DragFiller = {
 
 
 
+// TODO: Delete this array accessor nonsense.
+
 // NOTE: This is really more to prevent accidents than enforce strict behavior.
 //   Nothing particularly immutable about an object's '.arr' property.  I
 //   could've used a local scope variable and assigned each function in the
@@ -295,6 +340,10 @@ function ImmutableArrayAccessor(arr)
 
 ImmutableArrayAccessor.prototype.get = function(index)
 { return this.arr[index]; };
+
+ImmutableArrayAccessor.prototype.getLast = function()
+{ return this.arr[this.arr.length-1]; };
+
 
 ImmutableArrayAccessor.prototype.length = function()
 { return this.arr.length; };

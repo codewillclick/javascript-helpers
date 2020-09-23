@@ -3,10 +3,32 @@ helpers_js = true;
 
 exports = (typeof exports === 'undefined' ? {} : exports);
 
-function $q(q) { return document.querySelector(q) }
-function $qq(q) { return document.querySelectorAll(q) }
+function $q(d,q) {
+	if (!q) {
+		q = d;
+		d = document;
+	}
+	return d.querySelector(q);
+}
+function $qq(d,q) {
+	if (!q) {
+		q = d;
+		d = document;
+	}
+	return d.querySelectorAll(q)
+}
 exports.q = $q;
 exports.qq = $qq;
+
+function $r() {
+	return Array.from.apply(null,arguments)
+}
+
+function $el(t) { return document.createElement(t) }
+exports.el = $el;
+
+function $def(a) { return typeof a !== 'undefined' }
+exports.def = $def;
 
 // Oh neat, generators!
 function * $iterrange(a,b) {
@@ -20,6 +42,7 @@ exports.iterrange = $iterrange;
 // Oh hey, iterators!
 function * $itermap(r,f) {
 	var i=0;
+	f = f ? f : ((a)=>a)
 	if (r[Symbol.iterator])
 		for (var a of r)
 		{ yield f(a,i,r); i++ }
@@ -28,6 +51,18 @@ function * $itermap(r,f) {
 		{ yield f(r[k],i,r); i++ }
 }
 exports.itermap = $itermap;
+
+function * $iterfilter(r,check) {
+	if (r[Symbol.iterator])
+		for (var a of r)
+			if (check(a))
+			{ yield a }
+	else
+		for (var k in r)
+			if (check(r[k]))
+				yield r[k]
+}
+exports.iterfilter = $iterfilter;
 
 function $cs(e) {
 	var r,ret;
@@ -42,7 +77,7 @@ function $cs(e) {
 	ret = [];
 	for (var i in r) {
 		e = r[i];
-		e = ($q(e) ? typeof e === 'string' : e)
+		e = (typeof e === 'string' ? $q(e) : e)
 		ret.push(window.getComputedStyle(e,null));
 	}
 	return ret;
@@ -61,6 +96,8 @@ function $csp(e,p,ob) {
 	else
 		return $cs(e).getPropertyValue(p);
 }
+exports.cs = $cs;
+exports.csp = $csp;
 
 function $arr(a) {
 	var ret = [];
@@ -245,7 +282,7 @@ function $mirror(a,b,nest) {
 				var prior = stack2[stack2.length-1];
 				var ob2 = (prior[k] !== undefined
 					? prior[k]
-					: (prior[k]={}));
+					: (Array.isArray(ob) ? prior[k]=[] : prior[k]={}));
 				stack2.push(ob2);
 			}
 			else
@@ -354,14 +391,23 @@ function $ajax(method,url,asynch,params)
 			{ if (this.readyState == 4) f(this); }
 		};
 	}
+	else if ('ready' in p && typeof p.ready === 'function') {
+		var f = p.ready;
+		p = {
+			onreadystatechange:function()
+			{ if (this.readyState == 4) f(this); }
+		};
+	}
 	
 	var x = new XMLHttpRequest();	
 	// NOTE: There was a case where x would not be assigned p's
 	//   onreadystatechange function.  For now, doing the check/assign
 	//   manually.
 	//$assign(x,p);
-	if (p.onreadystatechange)
-		x.onreadystatechange = p.onreadystatechange;
+	if (p.onreadystatechange || p.ready)
+		x.onreadystatechange = p.onreadystatechange || p.ready;
+	if (p.onerror || p.error)
+		x.onerror = p.onerror || p.error;
 	if (method == 'GET' || !$def(params))
 	{
 		x.open(method,url,asynch,p.user,p.password);
@@ -375,11 +421,111 @@ function $ajax(method,url,asynch,params)
 			x.setRequestHeader("Content-type","application/x-www-form-urlencoded");
 			x.send(params);
 		}
+		else if ('data' in params && typeof params.data == 'string')
+		{	
+			x.open('POST',url,asynch);
+			x.setRequestHeader("Content-type","application/x-www-form-urlencoded");
+			x.send(params.data);
+		}
 	}
 	
 	return x;
 }
 exports.ajax = $ajax;
+
+function $trueOffset(n) {
+	var a = {x:n.offsetLeft,y:n.offsetTop};
+	n = n.offsetParent;
+	while (n) {
+		a.x += n.offsetLeft;
+		a.y += n.offsetTop;
+		n = n.offsetParent;
+	}
+	return a;
+}
+exports.trueOffset = $trueOffset;
+
+function $mutWaitChild(target,div,callback,config) {
+	var obs = new MutationObserver(function(muts) {
+		muts.forEach(function(mut) {
+			if (!mut.addedNodes)
+				return;
+			if (!($toarr(mut.addedNodes).includes(div)))
+				return;
+			callback(mut);
+			obs.disconnect();
+			return;
+		});
+	});
+	config = config || {};
+	config.childList = true;
+	obs.observe(target,config);
+}
+exports.mutWaitChild = $mutWaitChild;
+
+function $mutDelayOnAttrib(div,callback,wait,attributeFilter) {
+	wait = wait || 150;
+	attributeFilter = attributeFilter || ['value'];
+	if (typeof attributeFilter === 'string')
+		// It's a list of arguments, rather than a single array.
+		attributeFilter = Array.prototype.slice.call(arguments,3);
+	var last = new Date().getTime();
+	var m = new MutationObserver(function(muts) {
+		last = new Date().getTime();
+		setTimeout(function() {
+			var t = new Date().getTime();
+			if (t - last >= wait)
+				callback.call(div,m,muts);
+		},wait)
+	});
+	m.observe(div,{attributes:true,attributeFilter:attributeFilter});
+	return m;
+}
+exports.mutDelayOnAttrib = $mutDelayOnAttrib;
+
+function $delayOnEvent(div,ev,callback,wait) {
+	wait = wait || 150;
+	var last;
+	var f;
+	div.addEventListener(ev,f=function(e) {
+		last = new Date().getTime();
+		setTimeout(function() {
+			var t = new Date().getTime();
+				if (t - last >= wait)
+					callback(e);
+		},wait);
+	});
+	// Return handle for possible event removal.
+	return [ev,f];
+}
+exports.delayOnEvent = $delayOnEvent;
+
+// WARNING: Something may be wrong with binsearch.
+function $binsearchComp(r,v,f) {
+	var a = 0;
+	var b = r.length-1;
+	var m = Math.floor((a+b)*.5);
+	var x;
+	
+	while ((x=f(v,r[m])) != 0 && a < b) {
+		//console.log('eh',a,b,m,x);
+		if (x < 0)
+			b = m - 1;
+		else if (x > 0)
+			a = m + 1;
+		m = Math.floor((a+b)*.5);
+	}
+	
+	return (x != 0 ? -(m+1) : m);
+}
+exports.binsearchComp = $binsearchComp;
+
+function $binsearch(r,v) {
+	return $binsearchComp(r,v,function(a,b) {
+		return (a < b ? -1 : (a > b ? 1 : 0));
+	});
+}
+exports.binsearch = $binsearch;
 
 function $super() {
 	var ob = arguments[0];
